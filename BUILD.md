@@ -4,450 +4,99 @@ _Last updated: Oct 13, 2026_
 
 ## Goal
 
-Build a local-first clipping pipeline that can take a long-form YouTube/podcast video, identify the strongest short-form moments, convert them into TikTok-ready vertical clips, add kinetic captions, generate suggested post copy, and send finished videos to the authorized TikTok account's inbox/draft flow for manual review and posting.
+Build a local-first content production system that can take long-form source media, identify strong short-form moments, convert them into platform-ready vertical clips, add kinetic captions, generate post copy, preserve finished local outputs, and optionally deliver them to the correct social account.
 
-The current target is a Sonny Angel fan account. The account should feel like a genuine collector/fan page rather than a commercial storefront.
+The system is being built incrementally, with local/free tools doing as much work as possible and paid model inference used only where judgment adds meaningful value.
+
+The initial proving ground is a Sonny Angel TikTok fan account.
+
+Longer term, the system may support several distinct content channels with separate configurations, including:
+
+- Sonny Angel / collector content
+- lofi / ambient / white-noise content
+- podcast / entertainment clipping
+
+Each channel should ultimately have its own:
+
+- source criteria
+- content-selection rules
+- visual template
+- caption style
+- account credentials
+- upload destination
+- posting cadence
+
+Do not prematurely generalize the architecture until the current single-channel workflow is reliable.
 
 ---
 
-## Current V2 Workflow
+# Current Working Pipeline
 
-Current intended usage:
+Current manual-assisted workflow:
 
-```bash
+```text
+source video
+→ timestamped transcript
+→ Kimi selects strong clips
+→ review selections
+→ FFmpeg cuts each clip
+→ 16:9 source becomes 9:16
+→ local Whisper produces word timestamps
+→ ASS kinetic captions
+→ finished MP4 saved locally
+→ TikTok upload attempted
+→ manual posting fallback when necessary
+
+Current command:
 python3 process_source.py VIDEO TRANSCRIPT
-```
 
 Example:
-
-```bash
 python3 process_source.py podcast.mp4 source_transcript.txt
-```
 
-Current flow:
-
-1. Load the source video.
-2. Use a supplied timestamped transcript when available.
-3. If no transcript is provided, fall back to local Whisper transcription.
-4. Send the timestamped transcript to Kimi.
-5. Kimi selects the top five short-form clips and returns:
-   - rank
-   - start/end timestamps
-   - score
-   - hook
-   - category
-   - reason
-   - suggested TikTok caption
-6. Display all five choices for review.
-7. One confirmation starts the batch.
-8. Each clip is rendered by `run_pipeline.py`.
-9. Local Whisper generates word-level timing for the selected clip.
-10. `make_ass.py` builds kinetic ASS captions.
-11. Captions are burned into `final_tiktok.mp4`.
-12. The video is uploaded through TikTok's inbox/draft Content Posting flow.
-13. Finished local copies and caption/metadata files are stored in:
-    - `outputs/<source_name>/`
-
----
-
-## What Worked Today
-
-### Kimi clip selection
-
-Kimi successfully analyzed the full timestamped source transcript and selected five strong Sonny Angel clips.
-
-The selection quality was good enough to use as the editorial layer. It correctly prioritized topics such as:
-
-- Robby / secret figures
-- fake vs real Sonny Angels
-- blind-box weighing/shaking controversy
-- expensive/custom figures
-- beginner collecting/trading advice
-
-Kimi also generated usable fan-account-style TikTok captions.
-
-### Batch rendering
-
-`process_source.py` successfully started processing multiple clips sequentially.
-
-The first three clips:
-
-- rendered successfully
-- received word-level captions
-- burned captions correctly
-- uploaded successfully
-- reached `SEND_TO_USER_INBOX`
-- were saved locally as separate files
-
-The fourth clip rendered successfully but TikTok rejected the next inbox initialization with:
-
-```text
-spam_risk_too_many_pending_share
-```
-
-This was not a rendering bug.
-
-The TikTok account already had pending videos from earlier tests, so the available pending/draft capacity was reached.
-
-### Important architecture lesson
-
-Rendering and TikTok uploading should eventually be separated so a TikTok queue issue never prevents later clips from being generated.
-
-Future behavior should be:
-
-```text
-render all clips
-↓
-save all local copies
-↓
-attempt TikTok uploads independently
-↓
-if TikTok queue is full, keep the local file and continue
-```
-
----
-
-## Future Visual Mode: Split-Screen Supporting Visuals
-
-A strong future upgrade is a split-screen explainer layout inspired by short-form editing workflows in tools like CapCut.
-
-Concept:
-
-```text
-┌─────────────────────┐
-│ source video        │
-│ speaker / product   │
-├─────────────────────┤
-│ supporting visual   │
-│ image / B-roll /    │
-│ screenshot / card   │
-└─────────────────────┘
-```
-
-The purpose is to improve comprehension and retention by showing the viewer a relevant supporting visual while the speaker is talking.
-
-Examples:
-
-- Speaker mentions Robby → show a Robby image in the lower half.
-- Speaker discusses fake vs real Sonny Angels → show a comparison image.
-- Speaker says a figure sells for ~$400 → show the figure or a relevant price/reference screenshot.
-- Speaker explains a collector term → show a simple text/graphic card.
-- Speaker references something shown earlier → reuse a zoomed crop or still from the source video.
-
-This should be implemented as an optional render mode, not a replacement for the current blurred 9:16 default.
-
-Suggested future render modes:
-
-```text
-fit_blur
-    full 16:9 source preserved over blurred 9:16 background
-
-split_image
-    source video on top
-    one supporting still image on bottom
-
-split_video
-    source video on top
-    supporting B-roll/video on bottom
-
-smart_visual
-    system automatically chooses or generates supporting visuals by segment
-```
-
-Recommended rollout:
-
-1. `split_image`
-   - user supplies one image manually
-   - easiest and safest version
-2. asset-library mode
-   - select from a local folder of reusable images
-3. Kimi-assisted visual suggestions
-   - Kimi returns a visual type/query with each clip
-4. automatic visual retrieval/generation
-   - only after the core workflow is stable
-
-Potential future metadata from Kimi:
-
-```json
-{
-  "visual_type": "comparison_image",
-  "visual_query": "fake vs real Sonny Angel packaging",
-  "visual_reason": "supports the spoken warning and makes the clip easier to understand"
-}
-```
-
-Avoid building the fully automatic version first.
-
-Manual or local-asset support will be faster to debug and avoids introducing unnecessary copyright, watermark, quality, and search problems.
-
----
-
-## Keeping Kimi Inference Costs Low
-
-Current Kimi usage is already reasonably efficient, but this should remain a design constraint so a small credit balance can last for many source videos.
-
-The user estimated today's experimentation used roughly $0.50 of Kimi credits.
-
-Future work should focus on avoiding repeated inference rather than assuming a large recurring budget.
-
-### Core cost rule
-
-Use Kimi only for tasks where language-model judgment adds real value:
-
-```text
-Kimi:
-    rank clips
-    judge hooks
-    categorize clips
-    write short post captions
-
-Local/free tools:
-    download/source handling
-    transcript extraction
-    Whisper transcription
-    timestamp processing
-    clip rendering
-    caption timing
-    video encoding
-    filtering
-    validation
-```
-
-Do not use Kimi for mechanical work that Python, FFmpeg, yt-dlp, or Whisper can do locally.
-
-### 1. One Kimi call per source video
-
-The preferred workflow is:
-
-```text
-one compact timestamped transcript
-→ one Kimi request
-→ 3–5 ranked clips + captions + metadata
-```
-
-Avoid separate calls for:
-
-- clip ranking
-- caption writing
-- category labeling
-- hook writing
-
-Return all of those fields in one JSON response.
-
-### 2. Use segment-level transcripts for selection
-
-Do not send full Whisper word-level JSON to Kimi.
-
-For source selection, use compact lines such as:
-
-```text
-[03:03-03:15] There are so many fakes out there...
-[03:15-03:28] Sonny Angels are typically priced...
-```
-
-Word-level timing is only needed later for the selected clips and should remain local.
-
-This can reduce prompt size dramatically.
-
-### 3. Prefer YouTube captions over full-source Whisper when available
-
-For Kimi selection:
-
-```text
-YouTube timed captions
-→ compact transcript
-→ Kimi
-```
-
-Use local full-source Whisper only as a fallback.
-
-This reduces local compute time and avoids unnecessarily verbose transcript output.
-
-### 4. Cache every Kimi response
-
-If `clip_candidates.json` already exists for the same source/transcript, do not call Kimi again unless explicitly requested.
-
-Future improvement:
-
-```text
-source video hash + transcript hash
-→ cached Kimi result
-```
-
-Possible CLI:
-
-```bash
-python3 process_source.py podcast.mp4 source_transcript.txt
-```
-
-should automatically reuse the existing selection when the source and transcript have not changed.
-
-Optional override:
-
-```bash
---rerank
-```
-
-This is one of the highest-value cost-saving improvements.
-
-### 5. Separate rendering retries from inference
-
-A failed FFmpeg render or TikTok upload must never trigger Kimi again.
-
-Once clip choices are saved:
-
-```text
-clip_candidates.json
-```
-
-all rendering/upload retries should operate from that saved file.
-
-Examples:
-
-```bash
-python3 render_candidates.py clip_candidates.json
-python3 upload_outputs.py outputs/podcast/
-```
-
-This prevents paying for the same editorial decision twice.
-
-### 6. Keep prompts short and stable
-
-Avoid repeatedly sending long instructions explaining the entire project.
-
-The Kimi prompt should contain only:
-
-- account/audience goal
-- clip criteria
-- required JSON schema
-- timestamped transcript
-
-Move stable instructions into a concise prompt template.
-
-Avoid sending:
-
-- README content
-- build history
-- long explanations of the pipeline
-- raw Whisper metadata
-- previous model answers unless needed
-
-### 7. Ask for fewer clips when appropriate
-
-Five clips is useful for strong source videos, but not every source needs five.
-
-Possible future option:
-
-```bash
---clips 3
-```
-
-For weak or short videos, selecting three instead of five can reduce output tokens and avoid forcing mediocre clips.
-
-A later heuristic could estimate source length and choose something like:
-
-```text
-< 8 min     → 3 clips
-8–20 min    → 5 clips
-20+ min     → 5–8 clips
-```
-
-while keeping the number configurable.
-
-### 8. Pre-filter obvious weak transcript regions locally
-
-Before Kimi, local rules can remove:
-
-- intro housekeeping
-- sponsor reads
-- long pauses
-- outro/social plugs
-- repeated sections
-- segments with almost no speech
-
-This means Kimi sees fewer tokens and focuses on higher-signal material.
-
-Do not over-engineer this initially.
-
-Simple chapter/outro heuristics are enough.
-
-### 9. Reuse one inference for multiple render styles
-
-If one clip is later rendered as:
-
-```text
-fit_blur
-split_image
-split_video
-```
-
-reuse the same clip selection and caption metadata.
-
-Visual experimentation should never require rerunning Kimi.
-
-### 10. Benchmark cheaper models only if needed
-
-If Kimi offers a less expensive model that still reliably:
-
-- follows the JSON schema
-- understands timestamps
-- ranks short-form clips well
-- writes usable captions
-
-benchmark it on the same transcript and compare results.
-
-Do not switch purely because it is cheaper if selection quality drops materially.
-
-The goal is lowest cost per usable clip, not lowest token price.
-
-### Cost-efficient target architecture
-
-```text
-YouTube URL
-→ captions/transcript locally
-→ compact transcript
-→ ONE Kimi call
-→ cache clip_candidates.json
-→ everything else local
-→ unlimited rerenders without additional Kimi cost
-```
-
-That should make a small Kimi balance last much longer.
-
----
-
-## 9:16 Framing Problem
-
-### Old behavior
-
-The original vertical conversion used:
-
-```text
+For manually chosen timestamps:
+python3 run_pipeline.py VIDEO START END
+
+Example:
+python3 run_pipeline.py \
+"SONNY ANGEL HAUL UNBOXING! WE PULLED A ROBBY - Deion's Days (1080p).mp4" \
+00:04:56 \
+00:05:25
+
+What Is Working
+The difficult core pieces have now been proven.
+Source clipping
+FFmpeg successfully cuts specified sections from horizontal source videos.
+Fast seeking is performed before decoding:
+-ss START
+-i VIDEO
+
+Clip length is calculated as:
+duration = END - START
+
+and FFmpeg uses:
+-t DURATION
+
+This avoids the previous bug where moving -ss before -i while retaining -to caused clips to render far beyond the requested endpoint.
+Example:
+04:56 → 05:25
+
+correctly produces:
+29 seconds
+
+Default 9:16 Video Layout
+The old layout center-cropped horizontal YouTube videos:
 crop=608:1080:656:0,scale=1080:1920
-```
 
-This center-cropped the 1920x1080 source into a narrow vertical strip.
-
-Problem:
-
-- left/right content was discarded
-- products or objects shown near the sides disappeared
-- this is especially bad for product/collector videos
-
-### New default
-
-For ordinary horizontal 16:9 YouTube videos, the default should be:
-
-- 1080x1920 output
-- preserve the complete original 16:9 frame
-- center the full source frame
-- fill unused vertical space with a blurred enlarged copy of the same video
-- no stretching
-- captions remain burned over the final 9:16 composition
-
-Conceptually:
-
-```text
+This discarded the left and right sides of the frame.
+That was unacceptable for:
+- product videos
+- unboxings
+- videos where hands move around the frame
+- multi-person shots
+- visual demonstrations
+New default: fit_blur
+Horizontal 16:9 source video is preserved in full.
+The composition is:
 ┌─────────────────────┐
 │ blurred background  │
 │                     │
@@ -457,212 +106,540 @@ Conceptually:
 │                     │
 │ blurred background  │
 └─────────────────────┘
-```
 
-The visual test succeeded.
+Output:
+1080x1920
+9:16
 
-A full captioned production render also succeeded locally.
-
-The final output preserved the entire horizontal frame, used the blurred background correctly, and kept the kinetic captions readable.
-
----
-
-## 9:16 Default Implementation
-
-`run_pipeline.py` now uses the blurred-background composition.
-
-The intended filter is:
-
-```text
+Current FFmpeg filter:
 [0:v]split=2[bg][fg];
-[bg]scale=1080:1920:force_original_aspect_ratio=increase,
+[bg]
+scale=1080:1920:force_original_aspect_ratio=increase,
 crop=1080:1920,
-boxblur=20:1[blurred];
-[fg]scale=1080:-2:force_original_aspect_ratio=decrease[foreground];
-[blurred][foreground]overlay=(W-w)/2:(H-h)/2,
-setsar=1[v]
-```
+boxblur=20:1
+[blurred];
+[fg]
+scale=1080:-2:force_original_aspect_ratio=decrease
+[foreground];
+[blurred][foreground]
+overlay=(W-w)/2:(H-h)/2,
+setsar=1
+[v]
 
-The intended FFmpeg ordering is:
-
-```python
-"-ss", start_time,
-"-i", input_file,
-```
-
-rather than seeking after opening the source.
-
-This lets FFmpeg seek before decoding and is much faster when clipping later parts of long videos.
-
-### Final intended `create_vertical_clip()` behavior
-
-The function should:
-
-1. seek to `start_time`
-2. open the source video
-3. create the blurred 9:16 composition
-4. preserve source audio
-5. write `pipeline_vertical.mp4`
-
-Then the existing pipeline continues unchanged:
-
-```text
+This has now been successfully tested on real Sonny Angel source videos.
+The full horizontal frame remains visible and the blurred background makes the 9:16 canvas feel intentional.
+Caption Pipeline
+Selected clips are sent through local Whisper.
+Current sequence:
 pipeline_vertical.mp4
 → Whisper
+→ pipeline_vertical.json
+→ words.json
+→ make_ass.py
 → captions.ass
+→ FFmpeg burn
 → final_tiktok.mp4
-→ TikTok
-```
 
-The standalone `fit_blur_test.mp4` did not have captions because it was only a framing test.
-
-The normal production pipeline still adds captions afterward.
-
----
-
-## Definition of Done for the 9:16 Change
-
-The new framing can be considered complete when all of the following are true:
-
-- `run_pipeline.py` passes:
-
-```bash
-python3 -m py_compile run_pipeline.py
-```
-
-- `create_vertical_clip()` uses the blur/overlay composition
-- `-ss` appears before `-i`
-- blur is `boxblur=20:1`
-- output is 1080x1920
-- entire 16:9 source frame is visible
-- no horizontal stretching
-- kinetic captions still render correctly in the normal pipeline
-- local production render has been visually verified
-
-No other major code is required for this to become the default layout for normal 16:9 YouTube sources.
-
----
-
-## Captions
-
-Current caption flow:
-
-1. selected clip becomes `pipeline_vertical.mp4`
-2. local Whisper runs with word timestamps
-3. output JSON becomes `words.json`
-4. `make_ass.py` builds `captions.ass`
-5. FFmpeg burns ASS captions into `final_tiktok.mp4`
-
-Current style:
-
-- roughly 4 words visible at once
-- white bold text
+Current caption style:
+- approximately four words visible at once
+- bold white text
 - strong black outline
-- current spoken word highlighted yellow
+- currently spoken word highlighted yellow
 - lower-middle safe area
-- no bubble/pill
+- no caption bubble
 - Avenir Next Condensed
-- large TikTok-friendly size
-
-### Proper noun correction
-
-Whisper often transcribes:
-
-```text
+- large short-form-friendly sizing
+The timing has been visually tested and works well.
+Sonny Angel Proper-Noun Corrections
+Whisper sometimes mishears Sonny-specific terms.
+Existing correction:
 Sunny Angel
-Sunny Angels
-```
-
-Instead of:
-
-```text
+→
 Sonny Angel
-Sonny Angels
-```
 
-`make_ass.py` includes a proper-noun correction step before ASS formatting.
+The Robby test revealed another recurring error:
+Ravi
+→
+Robby
 
-This successfully fixes the final burned captions.
+The caption-processing layer should correct known domain-specific terms after Whisper transcription and before ASS markup.
+This allows Whisper to remain generic while channel-specific vocabulary is corrected locally for free.
+Future channel configurations may maintain their own vocabulary maps.
+Example:
+channels/
+    sonny/
+        vocabulary.json
 
----
+Possible entries:
+{
+  "Sunny Angel": "Sonny Angel",
+  "Sunny Angels": "Sonny Angels",
+  "Ravi": "Robby"
+}
 
-## Transcript Strategy
+Permanent Output Files
+final_tiktok.mp4 remains the temporary working output.
+Finished videos are also copied to permanent filenames before attempting TikTok upload.
+Permanent filename structure includes:
+- source filename
+- clip start timestamp
+- clip end timestamp
+Example:
+outputs/
+  SONNY ANGEL HAUL UNBOXING! WE PULLED A ROBBY - Deion's Days (1080p)/
+    SONNY ANGEL HAUL UNBOXING! WE PULLED A ROBBY - Deion's Days (1080p)_000456-000525.mp4
 
-Preferred source-selection transcript order:
+If exactly the same clip is rendered again:
+..._000456-000525_v2.mp4
 
-1. official/user-provided timed captions
-2. YouTube auto-generated timed captions
-3. local Whisper fallback
+then:
+..._000456-000525_v3.mp4
 
-For Kimi selection, segment-level timestamps are sufficient.
+etc.
+Finished work should never be silently overwritten.
+Render-All-Even-If-TikTok-Fails
+This is now a core reliability requirement.
+TikTok delivery must never determine whether local production succeeds.
+Desired architecture:
+render clip
+→ burn captions
+→ save permanent local copy
+→ attempt TikTok upload
+→ success OR failure
+→ return normally
+→ process next clip
 
-For the final selected clips, continue using local Whisper because the kinetic captions need accurate word-level timing.
+TikTok upload errors are caught and printed rather than terminating the pipeline.
+This is especially important for batch jobs.
+Desired five-clip behavior:
+Clip 1
+render
+save
+upload succeeds
 
-Important:
+Clip 2
+render
+save
+upload succeeds
 
-A supplied transcript must contain timestamps.
+Clip 3
+render
+save
+TikTok blocks upload
+continue
 
-Plain untimed transcript text is not enough for Kimi to reliably choose source clip boundaries.
+Clip 4
+render
+save
+TikTok blocks upload
+continue
 
----
+Clip 5
+render
+save
+TikTok blocks upload
+continue
 
-## TikTok Behavior
-
-Current integration uses the TikTok Content Posting API inbox/draft workflow.
-
-Successful upload sequence:
-
-```text
-initialize
-→ upload HTTP 201
+The batch should complete with all five local videos regardless of TikTok status.
+TikTok API Behavior
+Current integration uses TikTok's Content Posting API inbox/draft workflow.
+Successful sequence:
+initialize upload
+→ HTTP 201
 → PROCESSING_UPLOAD
 → SEND_TO_USER_INBOX
-```
 
-TikTok caption text cannot currently be pre-filled through this inbox workflow, so the system saves Kimi's suggested caption locally for manual copy/paste when posting.
-
-### Current TikTok limitation encountered
-
-TikTok returned:
-
-```text
+A successful inbox upload can then be completed from TikTok.
+Pending-share / anti-spam limit
+During testing TikTok returned:
 spam_risk_too_many_pending_share
-```
 
-when the account already had too many pending inbox/draft shares.
+This occurred after several pending uploads already existed.
+The practical lesson is:
+TikTok API delivery is rate/capacity constrained.
+Local rendering must not be.
 
-This should be treated as a queue/full-state issue, not a rendering failure.
+When the API refuses another upload:
+finished local file remains available
+→ manually upload via TikTok desktop
 
-### Current improvement needed
+Manual desktop upload is an acceptable fallback.
+Current practical production time with manual upload is approximately:
+5–10 minutes per clip
 
-Do not crash the entire batch if TikTok rejects one upload.
+which is acceptable for the current prototype.
+Current Sonny Account Workflow
+Current production loop:
+find promising Sonny source video
+→ obtain transcript
+→ choose clip manually or via Kimi
+→ run pipeline
+→ inspect finished MP4
+→ upload via API if available
+→ otherwise upload through TikTok desktop
+→ add caption
+→ credit original creator
+→ post
 
-Instead:
+Creator credit should be included when using third-party source material.
+Credit is good attribution practice but does not itself replace permission or other legal authorization to reuse copyrighted material.
+Kimi Integration
+Kimi currently provides the editorial judgment layer.
+Current model:
+kimi-k3
 
-- save the rendered local clip first
-- catch TikTok upload errors
-- print the error
-- continue rendering remaining clips
+Current API style:
+from openai import OpenAIclient = OpenAI(    api_key=os.environ["KIMI_API_KEY"],    base_url="https://api.moonshot.ai/v1",)
+
+
+Kimi receives a timestamped transcript and returns structured JSON containing:
+rank
+start
+end
+score
+hook
+category
+reason
+caption
+
+Kimi has successfully identified useful Sonny Angel clips including:
+- rare pulls
+- Robby moments
+- fake-vs-real advice
+- collector controversy
+- duplicates
+- collecting tips
+Keeping Kimi Inference Costs Low
+Inference cost should remain an explicit architectural constraint.
+Approximately $0.50 of Kimi credit was used during one development/testing session.
+That is manageable, but the system should be designed so a small balance can last for a long time.
+Core principle
+Use Kimi for judgment.
+Use local tools for mechanics.
+Kimi:
+    identify promising moments
+    rank hooks
+    classify clips
+    generate short captions
+
+Local/free:
+    downloads
+    transcript extraction
+    Whisper
+    timestamp conversion
+    video cutting
+    caption timing
+    FFmpeg
+    output naming
+    retries
+    uploads
+
+One Kimi request per source
+Preferred architecture:
+one compact transcript
+→ ONE Kimi request
+→ multiple ranked clips
+→ caption suggestions
+→ save JSON
+
+Do not make separate inference calls for:
+clip ranking
+caption writing
+hook writing
+categorization
+
+Return everything in one structured response.
+Cache Kimi results
+Once inference succeeds:
+clip_candidates.json
+
+becomes a permanent editorial artifact.
+Rendering the same source again must not call Kimi again.
+Retries caused by:
+- FFmpeg
+- captions
+- upload limits
+- visual-template experiments
+- TikTok failures
+must all reuse the existing JSON.
+Future ideal cache key:
+source hash
++
+transcript hash
+=
+Kimi result
+
+Potential behavior:
+python3 process_source.py VIDEO TRANSCRIPT
+
+checks the cache automatically.
+Only:
+--rerank
+
+should deliberately call Kimi again.
+Compact transcripts
+Do not send word-level Whisper JSON to Kimi.
+For clip selection, use lines such as:
+[04:42-04:55] ...
+[04:55-05:08] ...
+[05:08-05:22] ...
+
+Word-level timing is only necessary after a clip has already been selected.
+This keeps prompt tokens much lower.
+Prefer existing YouTube captions
+Preferred transcript order:
+1. official YouTube captions
+2. YouTube auto-generated captions
+3. local full-source Whisper
+
+Full-source Whisper should be a fallback rather than the default when usable timed captions already exist.
+Selected short clips can still use local Whisper for precise kinetic-caption timing.
+Remove low-signal transcript sections locally
+Potential future preprocessing can remove:
+- sponsor sections
+- long intros
+- housekeeping
+- outros
+- repeated calls to subscribe
+- music-only segments
+- long silent sections
+This reduces Kimi input tokens.
+Do not make the filtering overly aggressive.
+Interesting payoff moments must remain available.
+Variable number of clips
+Not every source needs five clips.
+Future option:
+--clips 3
+
+Possible heuristic:
+short source
+→ 3 candidates
+
+medium source
+→ 5 candidates
+
+long source
+→ 5–8 candidates
+
+The goal is useful clips, not forcing a fixed quota.
+Reuse inference across visual styles
+Once a clip is selected, it may later be rendered using:
+fit_blur
+split_image
+split_video
+
+All render variants should reuse the same Kimi result.
+Changing visuals must cost:
+$0 additional inference
+
+Future Visual Mode: Split-Screen Supporting Visuals
+A future visual upgrade is a split-screen explainer format.
+Concept:
+┌─────────────────────┐
+│ source video        │
+│                     │
+├─────────────────────┤
+│ supporting visual   │
+│ image / B-roll /    │
+│ screenshot / card   │
+└─────────────────────┘
+
+The supporting visual reinforces what is being discussed.
+Examples:
+speaker mentions Robby
+→ lower half shows Robby image
+
+speaker discusses fake Sonnies
+→ lower half shows comparison image
+
+speaker mentions $400 collectible
+→ lower half shows relevant figure/reference
+
+speaker explains collector terminology
+→ lower half shows text card
+
+Potential render modes:
+fit_blur
+split_image
+split_video
+smart_visual
+
+Recommended rollout:
+Phase 1
+manual image supplied by user
+
+Phase 2
+local reusable asset library
+
+Phase 3
+Kimi suggests supporting visual query/type
+
+Phase 4
+automatic visual retrieval or generation
+
+Do not build automatic visual sourcing first.
+YouTube URL Ingestion — Next Major Feature
+This is the next development milestone.
+Target command:
+python3 process_youtube.py "YOUTUBE_URL"
 
 Desired behavior:
+YouTube URL
+→ yt-dlp
+→ download source video
+→ fetch captions if available
+→ normalize captions into timestamped transcript
+→ Whisper fallback if necessary
+→ Kimi selects clips once
+→ cache selections
+→ user reviews
+→ render all clips
+→ save all clips
+→ attempt uploads
 
-```text
-Clip 1 → rendered → uploaded
-Clip 2 → rendered → uploaded
-Clip 3 → rendered → uploaded
-Clip 4 → rendered → TikTok queue full → saved locally
-Clip 5 → rendered → saved locally
-```
+This removes the current manual steps of:
+download video manually
+move video manually
+copy transcript manually
 
-TikTok should become an optional delivery step rather than a dependency for rendering completion.
+Target implementation tool:
+yt-dlp
 
----
+This feature is planned for the next build session.
+Only download/reuse source content where authorized or otherwise legally permitted.
+Multi-Channel Direction
+Long-term, the system may run several content pipelines.
+Initial target set:
+1. Sonny Angel channel
+2. lofi / ambient / white-noise channel
+3. podcast / entertainment clipping channel
 
-## Files
+Examples of entertainment source categories may include highly viewed creator/podcast material, subject to rights/permission requirements.
+The system should eventually route finished content to the appropriate destination automatically.
+Concept:
+content source
+→ channel configuration
+→ channel-specific processing
+→ channel-specific output
+→ correct account
 
-Core files:
+Potential configuration:
+channels/
+    sonny.json
+    lofi.json
+    podcast_clips.json
 
-```text
+Example conceptual configuration:
+{
+  "channel": "sonny",
+  "render_mode": "fit_blur",
+  "caption_style": "kinetic",
+  "num_clips": 5,
+  "platform": "tiktok"
+}
+
+Another:
+{
+  "channel": "lofi",
+  "render_mode": "longform",
+  "duration": "8h",
+  "platform": "youtube"
+}
+
+Do not implement this abstraction until at least two workflows are functioning in reality.
+Lofi / White-Noise Pipeline Concept
+This is a separate production workflow from clipping.
+Possible future flow:
+audio source/generation
+→ looping or evolving ambient composition
+→ long-duration visual
+→ render multi-hour video
+→ thumbnail/title/description
+→ upload to YouTube
+
+Potential content:
+- lofi beats
+- rain
+- fireplace ambience
+- café noise
+- sleep noise
+- white/brown noise
+- study ambience
+Important:
+Use audio and visuals the user owns, creates, licenses, or has permission to publish.
+This pipeline should not share unnecessary complexity with the clipping pipeline.
+Future Automated Daily Workflow
+Long-term target:
+scheduler starts job
+↓
+find or load source
+↓
+obtain transcript
+↓
+one model inference
+↓
+rank clips
+↓
+render all outputs
+↓
+save everything
+↓
+route to account
+↓
+upload where available
+↓
+human reviews exceptions
+
+Eventually the human role should move from:
+producer
+
+to:
+reviewer/editor
+
+Instead of spending roughly an hour producing content each day, the goal is to spend approximately:
+10–15 minutes
+
+reviewing a queue of already-generated outputs.
+Reliability Principles
+1. Local success comes first
+A finished local MP4 is the definition of successful rendering.
+Third-party API failure is a distribution issue.
+2. Save before uploading
+Always:
+render
+→ save permanent file
+→ external upload
+
+Never:
+render
+→ upload
+→ save
+
+3. External failures must be non-fatal
+Failures from:
+- TikTok
+- future YouTube APIs
+- rate limits
+- network outages
+must not destroy or halt completed local work.
+4. Cache paid inference
+Never repay for an editorial decision that already exists.
+5. Keep stable components stable
+Current proven pieces include:
+- FFmpeg source clipping
+- fast seek + duration clipping
+- blurred 9:16 format
+- Whisper word timing
+- ASS caption generation
+- kinetic caption burn
+- proper noun corrections
+- TikTok authentication
+- TikTok upload
+- TikTok status polling
+- Kimi structured clip selection
+- unique output filenames
+Prefer targeted changes over broad rewrites.
+Current Core Files
 process_source.py
 run_pipeline.py
 make_ass.py
@@ -671,41 +648,23 @@ find_clips.py
 tiktok_auth.py
 tiktok_upload.py
 tiktok_status.py
-```
 
-Runtime/intermediate files:
-
-```text
+Current intermediate files include:
 pipeline_vertical.mp4
+pipeline_vertical.json
 words.json
 captions.ass
 final_tiktok.mp4
 source_segments.json
 source_transcript.txt
 clip_candidates.json
-```
 
-Output structure:
-
-```text
+Permanent outputs live under:
 outputs/
-  podcast/
-    clip_01.mp4
-    clip_01_caption.txt
-    clip_01_info.json
-    clip_02.mp4
-    ...
-```
 
----
-
-## Security Before Public GitHub Upload
-
-Do not commit credentials or generated media.
-
-Recommended `.gitignore`:
-
-```gitignore
+Security
+Before making source code public, ensure secrets are excluded.
+Recommended .gitignore:
 tiktok_tokens.json
 .env
 *.mp4
@@ -715,286 +674,109 @@ words.json
 pipeline_vertical.json
 __pycache__/
 .DS_Store
-```
 
-Move any hardcoded TikTok client secret out of source code and into environment variables before making the repository public.
-
-Do not commit:
-
-```text
+Never commit:
 KIMI_API_KEY
 TikTok client secret
-TikTok access tokens
-TikTok refresh tokens
-```
+TikTok access token
+TikTok refresh token
 
----
-
-## Next Build Session
-
-Priority order:
-
-1. Make `process_source.py` resilient to TikTok queue/upload failures so later clips still render.
-2. Ensure rendered local files are saved before TikTok upload is attempted.
-3. Reuse cached `clip_candidates.json` so retries never use Kimi credits.
-4. Add `yt-dlp` input:
-   - source video download
-   - subtitle/auto-caption retrieval when available
-5. Normalize SRT/VTT/YouTube captions into the transcript format Kimi expects.
-6. Build:
-
-```bash
-python3 process_youtube.py "YOUTUBE_URL"
-```
-
-7. Add optional render modes later:
-   - `fit_blur`
-   - `split_image`
-   - `split_video`
-8. Eventually add source-video discovery/agent logic only after the one-video workflow is stable.
-
----
-
-## Target One-Command Experience
-
-Longer-term target:
-
-```bash
-python3 process_youtube.py "YOUTUBE_URL"
-```
-
-Expected flow:
-
-```text
-YouTube URL
-→ download authorized source
-→ obtain timed captions if available
-→ Whisper fallback if needed
-→ compact transcript
-→ ONE Kimi inference
-→ cache clip selections
-→ user reviews selections once
-→ render full-frame blurred 9:16 clips
-→ local Whisper word timing
-→ kinetic captions
-→ save all local outputs
-→ upload available clips to TikTok inbox
-→ user manually reviews/posts
-```
-
----
-
-## Longer-Term Agent Workflow
-
-Eventually:
-
-```text
-agent discovers promising source videos
-→ checks source / creator / rights criteria
-→ downloads authorized video
-→ fetches captions
-→ Kimi ranks the strongest moments
-→ pipeline renders clips
-→ TikTok inbox receives available drafts
-→ user reviews/posts
-```
-
-Potential later feedback loop:
-
-```text
-TikTok performance
-→ hook/category performance data
-→ improve future clip-selection rules
-```
-
-Do not build this until the single-source workflow is reliable.
-
----
-
-## Development Principles
-
-### 1. Local first
-
-Use local/free tools wherever possible.
-
-Prefer:
-
-- FFmpeg
-- Whisper
-- yt-dlp
-- Python
-- cached JSON/files
-
-Use paid inference only where judgment is needed.
-
-### 2. Save before external actions
-
-Always save a finished local artifact before:
-
-- uploading to TikTok
-- calling another API
-- starting another clip
-
-External failures should never destroy completed work.
-
-### 3. Cache expensive decisions
-
-Once Kimi chooses clips, save the result permanently.
-
-Rendering changes should not trigger new inference.
-
-### 4. Keep the stable pipeline stable
-
-Do not broadly rewrite working components.
-
-Prefer targeted changes.
-
-Current stable pieces include:
-
-- Whisper caption timing
-- ASS generation
-- proper noun correction
-- TikTok OAuth
-- TikTok inbox upload
-- TikTok status polling
-- FFmpeg caption burn
-- blurred 9:16 framing
-
-### 5. Build one abstraction only when needed
-
-Do not build multi-account or multi-template infrastructure before a second real use case exists.
-
-The Sonny Angel account is the current proving ground.
-
----
-
-## Debugging Guide
-
-### FFmpeg says `Late SEI is not implemented`
-
-This warning has appeared repeatedly with the test YouTube source.
-
-It has not prevented successful rendering.
-
-Treat it as non-fatal unless video output actually fails.
-
-### Whisper says:
-
-```text
+Move any currently hardcoded client secrets into environment variables before publishing the repository.
+Common Debugging Notes
+Whisper warning
 FP16 is not supported on CPU; using FP32 instead
-```
 
-Expected on the current Mac CPU setup.
-
+Expected.
 Not an error.
+FFmpeg Late SEI warnings
+Warnings such as:
+Late SEI is not implemented
 
-### TikTok upload returns HTTP 201
-
-Good.
-
-Continue polling status.
-
-### TikTok status reaches:
-
-```text
-SEND_TO_USER_INBOX
-```
-
-Success.
-
-Check TikTok notifications/inbox.
-
-### TikTok returns:
-
-```text
-spam_risk_too_many_pending_share
-```
-
-Pending inbox/draft capacity is full.
-
-Do not rerun Kimi.
-
-Keep the local clip and retry upload later.
-
-### Captions say `Sunny Angel`
-
-Check:
-
-```bash
-grep -i "sonny" captions.ass
-```
-
-If ASS contains `Sonny`, the proper noun correction is working even if raw Whisper console output says `Sunny`.
-
-### Video sides are missing
-
-Old crop mode is being used.
-
-The normal 16:9 default should now use `fit_blur`, not:
-
-```text
-crop=608:1080:656:0
-```
-
-### Video render is unexpectedly slow
-
-Check that FFmpeg seeks before decoding:
-
-```text
+have appeared with downloaded source files.
+Rendering has still completed successfully.
+Treat as non-fatal unless actual output fails.
+Clip unexpectedly runs for several minutes
+Check that the command uses:
 -ss START
 -i VIDEO
-```
+-t DURATION
 
-and that the blur is:
+Do not combine input-side -ss with the old absolute -to END logic.
+TikTok queue failure
+spam_risk_too_many_pending_share
 
-```text
-boxblur=20:1
-```
+Do not rerender.
+Do not rerun Kimi.
+Use the existing local MP4 and either:
+- retry API delivery later
+- manually upload using TikTok desktop
+Wrong Sonny terminology in captions
+Correct domain terms locally before ASS generation.
+Current known examples:
+Sunny → Sonny
+Ravi → Robby
 
-rather than the earlier heavier blur.
+Next Build Session
+Highest-priority items:
+1. Verify a full multi-clip batch continues after TikTok upload failure.
+2. Add YouTube URL ingestion using yt-dlp.
+3. Automatically retrieve timed YouTube captions where available.
+4. Normalize VTT/SRT captions for Kimi.
+5. Use Whisper only when usable captions are unavailable.
+6. Cache Kimi inference based on source/transcript.
+7. Build the first version of:
+python3 process_youtube.py "URL"
 
----
+After that:
+8. Begin separating channel configurations.
+9. Prototype second content workflow.
+10. Add optional split-screen visual mode.
+11. Eventually automate source discovery and scheduled production.
+Near-Term Target
+The next major version should reduce the workflow to:
+paste YouTube URL
+→ wait
+→ review selected clips
+→ receive finished local videos
+→ post
 
-## Current Project Status
+Then:
+paste YouTube URL
 
-The difficult pieces are now proven individually and together:
+becomes:
+automatically discover candidate source
 
-- local clipping
-- vertical formatting
-- full-frame blurred 9:16 layout
-- kinetic word highlighting
-- proper-noun correction
-- TikTok API upload
-- upload-status polling
-- full-source transcription
-- Kimi API connection
-- Kimi editorial clip selection
-- Kimi caption generation
-- multi-clip batch rendering
-- multi-clip TikTok inbox delivery
-- local production render with blurred layout + captions
+and eventually daily content generation can run with minimal intervention.
+Current Project Status
+The project has moved beyond proof-of-concept.
+The following are now demonstrated:
+source video
+→ selected moment
+→ correct duration
+→ 9:16 blurred composition
+→ Whisper
+→ kinetic captions
+→ unique permanent MP4
+→ TikTok delivery attempt
 
-The remaining work is mostly:
-
-```text
+Kimi has also demonstrated successful editorial selection from long timestamped transcripts.
+The remaining work is primarily:
+automation
 reliability
-source acquisition
-cost control
-render-mode expansion
-workflow polish
-```
+source ingestion
+inference caching
+multi-channel routing
+distribution
 
-rather than proving the core system can work.
-
-The next major milestone is:
-
-```text
+rather than proving that automated clipping itself is possible.
+Next major milestone:
 YouTube URL
-→ one Kimi call
-→ several cached clip selections
-→ several local TikTok-ready videos
-→ upload when TikTok capacity is available
-```
+→ one model call
+→ multiple cached selections
+→ multiple finished local clips
+→ upload wherever capacity is available
 
-without repeated inference or manual source preparation.
-```
+
+That leaves us in a very good place for tomorrow: **YouTube URL in → finished clips out** is the next major simplification.
+
+And I agree with the broader direction, with one caveat: for the MrBeast/podcast-style channel, build around sources you have permission or another valid right to republish. For the lofi/white-noise channel, using your own or properly licensed/generated audio and visuals gives you a much cleaner path to scaling and monetization.
